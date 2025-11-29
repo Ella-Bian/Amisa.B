@@ -1,0 +1,7 @@
+{
+  "name": "Amisa - Soulmate & Oracle",
+  "description": "An AI-powered Bazi soulmate and Qimen Dunjia divination companion.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
