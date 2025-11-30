@@ -242,8 +242,26 @@ export const siliconFlowService = {
 
   /**
    * Generates an image using SiliconFlow API.
+   * API Documentation: https://docs.siliconflow.cn/cn/api-reference/images/images-generations
+   * Model: Qwen/Qwen-Image-Edit-2509 (default)
+   * 
+   * Note: Qwen/Qwen-Image-Edit-2509 and Qwen/Qwen-Image-Edit do not support image_size field.
+   * The generated image URL is valid for one hour. Please download and store it promptly.
    */
-  async generateImage(prompt: string, token: string, model?: string): Promise<string> {
+  async generateImage(
+    prompt: string, 
+    token: string, 
+    options?: {
+      model?: string;
+      negative_prompt?: string;
+      seed?: number;
+      num_inference_steps?: number;
+      cfg?: number;
+      image?: string; // base64 or URL for image editing
+      image2?: string; // base64 or URL (only for Qwen/Qwen-Image-Edit-2509)
+      image3?: string; // base64 or URL (only for Qwen/Qwen-Image-Edit-2509)
+    }
+  ): Promise<string> {
     console.log('[siliconFlowService] generateImage called');
     
     if (!token) {
@@ -251,22 +269,48 @@ export const siliconFlowService = {
       throw new Error("SiliconFlow API Token is missing. Please check settings.");
     }
 
-    // 默认使用 Qwen 模型，也可以传入自定义模型
-    const imageModel = model || 'Qwen/Qwen-Image-Edit-2509';
+    // 默认使用 Qwen/Qwen-Image-Edit-2509 模型
+    const imageModel = options?.model || 'Qwen/Qwen-Image-Edit-2509';
 
     try {
       console.log('[siliconFlowService] Sending image generation request...', { model: imageModel });
       
+      // 构建请求体，根据新 API 文档格式
+      const requestBody: any = {
+        model: imageModel,
+        prompt: prompt,
+      };
+
+      // 添加可选参数
+      if (options?.negative_prompt) {
+        requestBody.negative_prompt = options.negative_prompt;
+      }
+      if (options?.seed !== undefined) {
+        requestBody.seed = options.seed;
+      }
+      if (options?.num_inference_steps !== undefined) {
+        requestBody.num_inference_steps = options.num_inference_steps;
+      }
+      if (options?.cfg !== undefined) {
+        requestBody.cfg = options.cfg;
+      }
+      if (options?.image) {
+        requestBody.image = options.image;
+      }
+      if (options?.image2) {
+        requestBody.image2 = options.image2;
+      }
+      if (options?.image3) {
+        requestBody.image3 = options.image3;
+      }
+
       const response = await fetch('https://api.siliconflow.cn/v1/images/generations', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          model: imageModel,
-          prompt: prompt,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       console.log('[siliconFlowService] Image generation response status:', response.status);
@@ -280,7 +324,8 @@ export const siliconFlowService = {
       const data: ImageGenerationResponse = await response.json();
       console.log('[siliconFlowService] Image generated successfully');
       
-      // 根据官方文档，响应结构是 data.images[0].url
+      // 根据新 API 文档，响应结构是 data.images[0].url
+      // 生成的图片 URL 有效期为 1 小时，需要及时下载保存
       if (data.images && data.images.length > 0 && data.images[0].url) {
         const imageUrl = data.images[0].url;
         console.log('[siliconFlowService] Image URL:', imageUrl);
