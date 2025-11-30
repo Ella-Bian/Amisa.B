@@ -5,16 +5,22 @@ import { Sun, Loader2, Sparkles, Coffee } from 'lucide-react';
 
 interface DailyInsightWidgetProps {
   user: UserProfile;
+  siliconFlowKey: string;
 }
 
-export const DailyInsightWidget: React.FC<DailyInsightWidgetProps> = ({ user }) => {
+export const DailyInsightWidget: React.FC<DailyInsightWidgetProps> = ({ user, siliconFlowKey }) => {
   const [insight, setInsight] = useState<DailyLuck | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchInsight = async () => {
+      if (!siliconFlowKey) {
+        setLoading(false);
+        return;
+      }
+      
       try {
-        const data = await chatService.getDailyInsight(user);
+        const data = await chatService.getDailyInsight(user, siliconFlowKey);
         setInsight(data);
       } catch (e) {
         console.error(e);
@@ -25,7 +31,7 @@ export const DailyInsightWidget: React.FC<DailyInsightWidgetProps> = ({ user }) 
     if (user) {
         fetchInsight();
     }
-  }, [user]);
+  }, [user, siliconFlowKey]);
 
   if (loading) return (
     <div className="w-full p-6 mb-6 rounded-2xl bg-slate-800/40 border border-slate-700/50 flex justify-center items-center h-40 animate-pulse">

@@ -1,39 +1,90 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserProfile, Soulmate } from '../types';
 import { chatService } from '../services/geminiService';
 import { Sparkles, ArrowRight, Fingerprint, Calendar, Clock, Loader2 } from 'lucide-react';
 
 interface OnboardingProps {
   onComplete: (user: UserProfile, soulmate: Soulmate) => void;
+  siliconFlowKey: string;
 }
 
-export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
+export const Onboarding: React.FC<OnboardingProps> = ({ onComplete, siliconFlowKey }) => {
+  console.log('[Onboarding] Component mounted, siliconFlowKey:', siliconFlowKey ? 'Present' : 'Missing');
+  
   const [step, setStep] = useState<'input' | 'generating' | 'reveal'>('input');
   const [name, setName] = useState('');
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
   const [generatedSoulmate, setGeneratedSoulmate] = useState<Soulmate | null>(null);
 
+  // 加载已保存的用户数据
+  useEffect(() => {
+    const savedUser = localStorage.getItem('AMISA_USER');
+    if (savedUser) {
+      try {
+        const userData = JSON.parse(savedUser) as UserProfile;
+        console.log('[Onboarding] Found saved user data, pre-filling form');
+        setName(userData.name);
+        setDate(userData.birthDate);
+        setTime(userData.birthTime);
+        
+        // 如果有保存的soulmate，可以直接进入reveal步骤
+        const savedSoulmate = localStorage.getItem('AMISA_SOULMATE');
+        if (savedSoulmate) {
+          try {
+            const soulmateData = JSON.parse(savedSoulmate) as Soulmate;
+            setGeneratedSoulmate(soulmateData);
+            setStep('reveal');
+            console.log('[Onboarding] Found saved soulmate, showing reveal step');
+          } catch (error) {
+            console.error('[Onboarding] Failed to parse saved soulmate:', error);
+          }
+        }
+      } catch (error) {
+        console.error('[Onboarding] Failed to parse saved user data:', error);
+      }
+    }
+  }, []);
+
   const handleSubmit = async () => {
-    if (!name || !date || !time) return;
+    console.log('[Onboarding] handleSubmit called', { name, date, time, hasKey: !!siliconFlowKey });
+    
+    if (!name || !date || !time) {
+      console.warn('[Onboarding] Validation failed: missing required fields');
+      return;
+    }
+
+    if (!siliconFlowKey) {
+      console.error('[Onboarding] SiliconFlow API key is missing');
+      alert("Please configure your SiliconFlow API Token in Settings first.");
+      return;
+    }
 
     const user: UserProfile = { name, birthDate: date, birthTime: time };
+    console.log('[Onboarding] Starting soulmate generation...');
     setStep('generating');
 
     try {
-      const soulmate = await chatService.generateSoulmate(user);
+      const soulmate = await chatService.generateSoulmate(user, siliconFlowKey);
+      console.log('[Onboarding] Soulmate generated successfully:', soulmate);
       setGeneratedSoulmate(soulmate);
       setStep('reveal');
     } catch (error) {
-      console.error(error);
+      console.error('[Onboarding] Error generating soulmate:', error);
       setStep('input');
-      alert("The stars are clouded. Please try again.");
+      const errorMessage = error instanceof Error && error.message.includes("Token")
+        ? "Please configure your SiliconFlow API Token in Settings."
+        : "The stars are clouded. Please try again.";
+      alert(errorMessage);
     }
   };
 
   const handleEnterApp = () => {
+    console.log('[Onboarding] Entering app...', { hasSoulmate: !!generatedSoulmate, name, date, time });
     if (generatedSoulmate && name && date && time) {
       onComplete({ name, birthDate: date, birthTime: time }, generatedSoulmate);
+    } else {
+      console.warn('[Onboarding] Cannot enter app: missing data');
     }
   };
 
@@ -130,9 +181,24 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
     <div className="flex flex-col items-center justify-center min-h-screen p-6 animate-fade-in">
        <div className="max-w-sm w-full bg-slate-900 border border-violet-500/30 rounded-2xl p-8 shadow-[0_0_50px_-12px_rgba(139,92,246,0.25)] relative text-center">
           
-          <div className="w-20 h-20 bg-gradient-to-br from-violet-500 to-amber-500 rounded-full mx-auto mb-6 flex items-center justify-center shadow-lg">
-             <span className="text-3xl">✦</span>
-          </div>
+          {/* Soulmate Avatar */}
+          {generatedSoulmate?.imageUrl ? (
+            <div className="w-24 h-24 mx-auto mb-6 rounded-full overflow-hidden border-4 border-violet-500/50 shadow-lg">
+              <img 
+                src={generatedSoulmate.imageUrl} 
+                alt={generatedSoulmate.name}
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  console.error('[Onboarding] Failed to load soulmate image');
+                  e.currentTarget.style.display = 'none';
+                }}
+              />
+            </div>
+          ) : (
+            <div className="w-20 h-20 bg-gradient-to-br from-violet-500 to-amber-500 rounded-full mx-auto mb-6 flex items-center justify-center shadow-lg">
+              <span className="text-3xl">✦</span>
+            </div>
+          )}
 
           <h2 className="text-sm text-slate-400 uppercase tracking-widest mb-1">Your Soulmate</h2>
           <h1 className="text-4xl font-serif text-white mb-2">{generatedSoulmate?.name}</h1>
@@ -161,6 +227,16 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
            >
              Start Journey
            </button>
+
+          <button 
+            onClick={() => {
+              setStep('input');
+              setGeneratedSoulmate(null);
+            }}
+            className="mt-3 text-xs text-slate-500 hover:text-slate-300 underline w-full"
+          >
+            重新生成
+          </button>
        </div>
     </div>
   );

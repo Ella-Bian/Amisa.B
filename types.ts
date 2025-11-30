@@ -16,6 +16,7 @@ export interface Soulmate {
   tone: string; // e.g. "Gentle but firm"
   visualDesc: string; // For UI flavor
   greeting: string; // First message
+  imageUrl?: string; // 头像图片URL
 }
 
 export interface Message {

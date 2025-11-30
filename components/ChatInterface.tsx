@@ -79,8 +79,12 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user, soulmate, si
     }]);
 
     try {
+      if (!siliconFlowKey) {
+        throw new Error("SiliconFlow API Token is missing. Please configure it in Settings.");
+      }
+      
       // Pass soulmate and user context to service
-      const stream = chatService.sendMessageStream(history, userMsg.text, soulmate, user);
+      const stream = chatService.sendMessageStream(history, userMsg.text, soulmate, user, siliconFlowKey);
       
       let fullText = '';
       for await (const chunk of stream) {
@@ -93,8 +97,11 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user, soulmate, si
       }
     } catch (error) {
       console.error(error);
+      const errorMessage = error instanceof Error && error.message.includes("Token") 
+        ? "Please configure your SiliconFlow API Token in Settings."
+        : "The energetic connection is faint right now... please try again.";
       setMessages(prev => prev.map(m => 
-        m.id === modelMsgId ? { ...m, text: "The energetic connection is faint right now... please try again." } : m
+        m.id === modelMsgId ? { ...m, text: errorMessage } : m
       ));
     } finally {
       setIsStreaming(false);
@@ -170,9 +177,35 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ user, soulmate, si
     <div className="flex flex-col h-full relative bg-slate-950">
       <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24">
         <div className="max-w-2xl mx-auto">
+          {/* Soulmate Avatar Section */}
+          {soulmate.imageUrl && (
+            <div className="flex justify-center mb-6 animate-fade-in">
+              <div className="relative group">
+                <img 
+                  src={soulmate.imageUrl} 
+                  alt={soulmate.name}
+                  className="w-24 h-24 rounded-full object-cover border-4 border-violet-500/50 shadow-lg shadow-violet-900/50 transition-transform group-hover:scale-105"
+                  onError={(e) => {
+                    console.error('[ChatInterface] Failed to load soulmate image');
+                    e.currentTarget.style.display = 'none';
+                  }}
+                />
+                <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 px-3 py-1 bg-slate-800/90 backdrop-blur-sm rounded-full border border-violet-500/50 shadow-lg">
+                  <span className="text-xs text-violet-300 font-medium">{soulmate.name}</span>
+                </div>
+              </div>
+            </div>
+          )}
+          
           {/* Daily Insight can utilize user info if we wanted to expand it later */}
-          <DailyInsightWidget user={user} />
-          {messages.map(m => <ChatMessage key={m.id} message={m} />)}
+          <DailyInsightWidget user={user} siliconFlowKey={siliconFlowKey} />
+          {messages.map(m => (
+            <ChatMessage 
+              key={m.id} 
+              message={m} 
+              soulmateImageUrl={m.role === 'model' ? soulmate.imageUrl : undefined} 
+            />
+          ))}
           <div ref={messagesEndRef} />
         </div>
       </div>

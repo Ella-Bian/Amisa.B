@@ -7,6 +7,8 @@ import { SettingsModal } from './components/SettingsModal';
 import { MessageCircle, Compass, Settings } from 'lucide-react';
 
 const App: React.FC = () => {
+  console.log('[App] Component initialized');
+  
   const [view, setView] = useState<ViewState>(ViewState.COMPANION);
   const [user, setUser] = useState<UserProfile | null>(null);
   const [soulmate, setSoulmate] = useState<Soulmate | null>(null);
@@ -15,10 +17,46 @@ const App: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [siliconFlowKey, setSiliconFlowKey] = useState('');
 
-  // Load Settings from LocalStorage on mount
+  // Load Settings from LocalStorage on mount, fallback to env variable
   useEffect(() => {
+    console.log('[App] useEffect: Loading settings from localStorage');
+    
+    // 加载 API Key
     const savedKey = localStorage.getItem('AMISA_SF_KEY');
-    if (savedKey) setSiliconFlowKey(savedKey);
+    if (savedKey) {
+      console.log('[App] Found saved SiliconFlow key in localStorage');
+      setSiliconFlowKey(savedKey);
+    } else {
+      // Try to load from environment variable
+      const envKey = import.meta.env.VITE_SILICONFLOW_API_KEY;
+      console.log('[App] Checking environment variable for SiliconFlow key:', envKey ? 'Found' : 'Not found');
+      if (envKey) {
+        setSiliconFlowKey(envKey);
+        // Also save to localStorage for persistence
+        localStorage.setItem('AMISA_SF_KEY', envKey);
+        console.log('[App] Saved environment key to localStorage');
+      } else {
+        console.warn('[App] No SiliconFlow API key found in localStorage or environment variables');
+      }
+    }
+
+    // 加载用户数据
+    const savedUser = localStorage.getItem('AMISA_USER');
+    const savedSoulmate = localStorage.getItem('AMISA_SOULMATE');
+    
+    if (savedUser && savedSoulmate) {
+      try {
+        const userData = JSON.parse(savedUser) as UserProfile;
+        const soulmateData = JSON.parse(savedSoulmate) as Soulmate;
+        console.log('[App] Found saved user and soulmate data');
+        setUser(userData);
+        setSoulmate(soulmateData);
+      } catch (error) {
+        console.error('[App] Failed to parse saved user data:', error);
+        localStorage.removeItem('AMISA_USER');
+        localStorage.removeItem('AMISA_SOULMATE');
+      }
+    }
   }, []);
 
   const handleSaveSettings = (key: string) => {
@@ -27,14 +65,33 @@ const App: React.FC = () => {
   };
 
   const handleOnboardingComplete = (newUser: UserProfile, newSoulmate: Soulmate) => {
+    console.log('[App] Onboarding complete:', { userName: newUser.name, soulmateName: newSoulmate.name });
+    
+    // 保存到 localStorage
+    localStorage.setItem('AMISA_USER', JSON.stringify(newUser));
+    localStorage.setItem('AMISA_SOULMATE', JSON.stringify(newSoulmate));
+    console.log('[App] Saved user and soulmate data to localStorage');
+    
     setUser(newUser);
     setSoulmate(newSoulmate);
   };
 
   // If we don't have a user or soulmate yet, show Onboarding
+  useEffect(() => {
+    console.log('[App] State update:', { 
+      hasUser: !!user, 
+      hasSoulmate: !!soulmate, 
+      view, 
+      hasSiliconFlowKey: !!siliconFlowKey 
+    });
+  }, [user, soulmate, view, siliconFlowKey]);
+
   if (!user || !soulmate) {
-    return <Onboarding onComplete={handleOnboardingComplete} />;
+    console.log('[App] Rendering Onboarding component (user or soulmate missing)');
+    return <Onboarding onComplete={handleOnboardingComplete} siliconFlowKey={siliconFlowKey} />;
   }
+
+  console.log('[App] Rendering main app interface');
 
   return (
     <div className="flex justify-center min-h-screen bg-slate-950 text-slate-200 selection:bg-violet-500/30">
@@ -60,7 +117,7 @@ const App: React.FC = () => {
                 <ChatInterface user={user} soulmate={soulmate} siliconFlowKey={siliconFlowKey} />
             </div>
              <div className={`absolute inset-0 transition-opacity duration-300 ${view === ViewState.DIVINATION ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'} ${view === ViewState.DIVINATION ? 'pointer-events-auto' : ''}`}>
-                <DivinationPanel user={user} />
+                <DivinationPanel user={user} siliconFlowKey={siliconFlowKey} />
             </div>
         </main>
 

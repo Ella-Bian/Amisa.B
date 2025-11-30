@@ -1,10 +1,24 @@
-import { GoogleGenAI, Type } from "@google/genai";
 import { QimenResult, DailyLuck, UserProfile, Soulmate } from "../types";
+import { siliconFlowService } from "./siliconFlowService";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
-const MODEL_CHAT = "gemini-2.5-flash"; 
-const MODEL_REASONING = "gemini-2.5-flash";
+/**
+ * 辅助函数：根据五行元素返回视觉风格描述
+ */
+function getElementVisualStyle(element: string): string {
+  const elementLower = element.toLowerCase();
+  if (elementLower.includes('fire') || elementLower.includes('火')) {
+    return 'warm colors, passionate energy, golden and red tones, bright and illuminating';
+  } else if (elementLower.includes('water') || elementLower.includes('水')) {
+    return 'cool colors, flowing energy, blue and silver tones, calm and serene';
+  } else if (elementLower.includes('wood') || elementLower.includes('木')) {
+    return 'nature colors, growing energy, green and brown tones, fresh and vibrant';
+  } else if (elementLower.includes('metal') || elementLower.includes('金')) {
+    return 'metallic colors, structured energy, silver and white tones, sharp and precise';
+  } else if (elementLower.includes('earth') || elementLower.includes('土')) {
+    return 'earth tones, stable energy, brown and yellow tones, grounded and nurturing';
+  }
+  return 'mystical and balanced colors';
+}
 
 /**
  * Generates the System Instruction dynamically based on the specific Soulmate persona.
@@ -53,7 +67,9 @@ export const chatService = {
   /**
    * Generates a Soulmate persona based on the user's Bazi.
    */
-  async generateSoulmate(user: UserProfile): Promise<Soulmate> {
+  async generateSoulmate(user: UserProfile, token: string): Promise<Soulmate> {
+    console.log('[chatService] generateSoulmate called', { userName: user.name, hasToken: !!token });
+    
     const prompt = `
       Analyze the destiny of a woman born on ${user.birthDate} at ${user.birthTime}.
       1. Determine her 'Day Master' (Five Elements) and whether she is Weak or Strong (simplified Bazi analysis).
@@ -72,31 +88,65 @@ export const chatService = {
       - tone: How he speaks to her.
       - visualDesc: A short visual description (e.g., "Eyes like deep ocean").
       - greeting: A short, deep first message to her.
+      
+      IMPORTANT: You must return ONLY valid JSON, no other text.
     `;
 
-    const response = await ai.models.generateContent({
-      model: MODEL_REASONING,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            name: { type: Type.STRING },
-            element: { type: Type.STRING },
-            personality: { type: Type.STRING },
-            tone: { type: Type.STRING },
-            visualDesc: { type: Type.STRING },
-            greeting: { type: Type.STRING },
-          }
-        }
-      }
-    });
+    const systemInstruction = `You are an expert in Bazi (Chinese astrology) analysis. You must respond with valid JSON only, no additional text or markdown formatting.`;
 
-    if (response.text) {
-      return JSON.parse(response.text) as Soulmate;
+    console.log('[chatService] Calling SiliconFlow API...');
+    const response = await siliconFlowService.chatCompletion(
+      [{ role: 'user', content: prompt }],
+      token,
+      systemInstruction
+    );
+    console.log('[chatService] Received response from API, length:', response.length);
+
+    // Try to extract JSON from response (in case it's wrapped in markdown)
+    let jsonText = response.trim();
+    if (jsonText.startsWith('```json')) {
+      jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    } else if (jsonText.startsWith('```')) {
+      jsonText = jsonText.replace(/```\n?/g, '').trim();
     }
-    throw new Error("Failed to generate soulmate");
+
+    console.log('[chatService] Parsing JSON response...');
+    try {
+      const soulmate = JSON.parse(jsonText) as Soulmate;
+      console.log('[chatService] Successfully parsed soulmate:', soulmate);
+
+      // 生成图像
+      try {
+        console.log('[chatService] Generating soulmate image...');
+        
+        // 根据五行元素和描述构建图像提示词
+        const imagePrompt = `
+          A mystical and elegant portrait avatar of ${soulmate.name}, 
+          representing the ${soulmate.element} element in Chinese Five Elements philosophy.
+          ${soulmate.visualDesc}
+          Personality traits: ${soulmate.personality}
+          Style: Modern anime-inspired character portrait, ethereal atmosphere, 
+          soft cinematic lighting, mystical aura, centered composition, close-up portrait.
+          The artwork should embody the essence of ${soulmate.element} element - 
+          ${getElementVisualStyle(soulmate.element)}.
+          Square format, high quality, detailed.
+        `;
+        
+        const imageUrl = await siliconFlowService.generateImage(imagePrompt, token);
+        soulmate.imageUrl = imageUrl;
+        console.log('[chatService] Soulmate image generated successfully');
+      } catch (error) {
+        console.error('[chatService] Failed to generate soulmate image:', error);
+        // 图像生成失败不影响整体流程，可以设置一个默认头像或留空
+        soulmate.imageUrl = undefined;
+      }
+
+      return soulmate;
+    } catch (e) {
+      console.error("[chatService] Failed to parse soulmate JSON:", jsonText);
+      console.error("[chatService] Parse error:", e);
+      throw new Error("Failed to generate soulmate: Invalid JSON response");
+    }
   },
 
   /**
@@ -106,27 +156,38 @@ export const chatService = {
     history: {role: string, parts: {text: string}[]}[], 
     message: string, 
     soulmate: Soulmate,
-    user: UserProfile
+    user: UserProfile,
+    token: string
   ) {
-    const chat = ai.chats.create({
-      model: MODEL_CHAT,
-      config: {
-        systemInstruction: getSoulmateSystemInstruction(soulmate, user),
-      },
-      history: history,
+    // Convert history format to SiliconFlow format
+    const messages = history.map(h => ({
+      role: h.role === 'user' ? 'user' : 'assistant' as const,
+      content: h.parts[0]?.text || ''
+    }));
+
+    // Add current user message
+    messages.push({
+      role: 'user',
+      content: message
     });
 
-    const result = await chat.sendMessageStream({ message });
+    const systemInstruction = getSoulmateSystemInstruction(soulmate, user);
+
+    const stream = siliconFlowService.chatCompletionStream(
+      messages,
+      token,
+      systemInstruction
+    );
     
-    for await (const chunk of result) {
-      yield chunk.text;
+    for await (const chunk of stream) {
+      yield chunk;
     }
   },
 
   /**
    * Performs a Qimen Divination with User Context.
    */
-  async performDivination(question: string, user: UserProfile): Promise<QimenResult> {
+  async performDivination(question: string, user: UserProfile, token: string): Promise<QimenResult> {
     const now = new Date();
     const prompt = `
       User Profile: ${user.name}, Born: ${user.birthDate} ${user.birthTime}.
@@ -136,77 +197,82 @@ export const chatService = {
       Perform a Qimen Dunjia reading tailored for this user. 
       Consider her birth data (Bazi) to see if the current time supports her 'Day Master'.
       Focus on the result being relevant to Career Strategy or Emotional Harmony.
+      
+      Return a JSON object with:
+      - summary: A brief summary of the reading
+      - elements: An object with door (string), star (string), god (string)
+      - auspiciousDirection: A direction (e.g., "North", "East")
+      - advice: Strategic advice for the user
+      - luckyColor: A lucky color (e.g., "Emerald Green")
+      
+      IMPORTANT: You must return ONLY valid JSON, no other text.
     `;
 
-    const response = await ai.models.generateContent({
-      model: MODEL_REASONING,
-      contents: prompt,
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION_QIMEN,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            summary: { type: Type.STRING },
-            elements: {
-              type: Type.OBJECT,
-              properties: {
-                door: { type: Type.STRING },
-                star: { type: Type.STRING },
-                god: { type: Type.STRING },
-              }
-            },
-            auspiciousDirection: { type: Type.STRING },
-            advice: { type: Type.STRING },
-            luckyColor: { type: Type.STRING },
-          }
-        }
-      }
-    });
+    const response = await siliconFlowService.chatCompletion(
+      [{ role: 'user', content: prompt }],
+      token,
+      SYSTEM_INSTRUCTION_QIMEN + "\n\nYou must respond with valid JSON only, no additional text or markdown formatting."
+    );
 
-    if (response.text) {
-      return JSON.parse(response.text) as QimenResult;
+    // Try to extract JSON from response (in case it's wrapped in markdown)
+    let jsonText = response.trim();
+    if (jsonText.startsWith('```json')) {
+      jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    } else if (jsonText.startsWith('```')) {
+      jsonText = jsonText.replace(/```\n?/g, '').trim();
     }
-    
-    throw new Error("Failed to generate divination result");
+
+    try {
+      return JSON.parse(jsonText) as QimenResult;
+    } catch (e) {
+      console.error("Failed to parse divination JSON:", jsonText);
+      throw new Error("Failed to generate divination result: Invalid JSON response");
+    }
   },
 
   /**
    * Generates a quick "Daily Luck" insight.
    */
-  async getDailyInsight(user: UserProfile): Promise<DailyLuck> {
-    const prompt = `Generate a daily spiritual insight for ${user.name} (Born ${user.birthDate}). Focus on mindset and energy.`;
+  async getDailyInsight(user: UserProfile, token: string): Promise<DailyLuck> {
+    const prompt = `Generate a daily spiritual insight for ${user.name} (Born ${user.birthDate}). Focus on mindset and energy.
     
-    const response = await ai.models.generateContent({
-      model: MODEL_CHAT,
-      contents: prompt,
-      config: {
-        systemInstruction: "You are Amisa. Provide a daily 'Energy Weather Report'. Be elegant.",
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            score: { type: Type.INTEGER },
-            keyword: { type: Type.STRING },
-            brief: { type: Type.STRING },
-            luckyColor: { type: Type.STRING },
-            suitableActivity: { type: Type.STRING },
-          }
-        }
-      }
-    });
+    Return a JSON object with:
+    - score: A number between 0-100 representing daily fortune
+    - keyword: A single word or short phrase (e.g., "Clarity", "Flow")
+    - brief: A one-sentence fortune or insight
+    - luckyColor: A color name (e.g., "Emerald Green", "Blue")
+    - suitableActivity: An activity recommendation (e.g., "Negotiation", "Meditation", "Tidying")
+    
+    IMPORTANT: You must return ONLY valid JSON, no other text.`;
+    
+    const systemInstruction = "You are Amisa. Provide a daily 'Energy Weather Report'. Be elegant. You must respond with valid JSON only, no additional text or markdown formatting.";
 
-    if (response.text) {
-      return JSON.parse(response.text) as DailyLuck;
+    try {
+      const response = await siliconFlowService.chatCompletion(
+        [{ role: 'user', content: prompt }],
+        token,
+        systemInstruction
+      );
+
+      // Try to extract JSON from response (in case it's wrapped in markdown)
+      let jsonText = response.trim();
+      if (jsonText.startsWith('```json')) {
+        jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      } else if (jsonText.startsWith('```')) {
+        jsonText = jsonText.replace(/```\n?/g, '').trim();
+      }
+
+      return JSON.parse(jsonText) as DailyLuck;
+    } catch (e) {
+      console.error("Failed to generate daily insight:", e);
+      // Fallback
+      return { 
+        score: 88, 
+        keyword: "Flow", 
+        brief: "The water flows around the rock.",
+        luckyColor: "Blue",
+        suitableActivity: "Planning"
+      };
     }
-    
-    // Fallback
-    return { 
-      score: 88, 
-      keyword: "Flow", 
-      brief: "The water flows around the rock.",
-      luckyColor: "Blue",
-      suitableActivity: "Planning"
-    };
   }
 };

@@ -5,24 +5,34 @@ import { Compass, Sparkles, ArrowRight, RefreshCw, X, AlertCircle, Moon, MapPin 
 
 interface DivinationPanelProps {
   user: UserProfile;
+  siliconFlowKey: string;
 }
 
-export const DivinationPanel: React.FC<DivinationPanelProps> = ({ user }) => {
+export const DivinationPanel: React.FC<DivinationPanelProps> = ({ user, siliconFlowKey }) => {
   const [question, setQuestion] = useState('');
   const [result, setResult] = useState<QimenResult | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleDivination = async () => {
     if (!question.trim()) return;
+    
+    if (!siliconFlowKey) {
+      alert("Please configure your SiliconFlow API Token in Settings to use the Oracle.");
+      return;
+    }
+    
     setLoading(true);
     setResult(null);
 
     try {
-      const data = await chatService.performDivination(question, user);
+      const data = await chatService.performDivination(question, user, siliconFlowKey);
       setResult(data);
     } catch (error) {
       console.error(error);
-      alert("The connection to the oracle was interrupted. Please try again.");
+      const errorMessage = error instanceof Error && error.message.includes("Token")
+        ? "Please configure your SiliconFlow API Token in Settings."
+        : "The connection to the oracle was interrupted. Please try again.";
+      alert(errorMessage);
     } finally {
       setLoading(false);
     }

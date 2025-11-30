@@ -41,7 +41,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
               className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-slate-200 focus:outline-none focus:border-violet-500 transition-colors"
             />
             <p className="text-[10px] text-slate-500 mt-2 leading-relaxed">
-              Required for voice input features. Used to call the TeleSpeechASR model via SiliconFlow.
+              Required for chat and voice input features. Used to call DeepSeek-V3 for conversations and TeleSpeechASR for voice transcription via SiliconFlow.
             </p>
           </div>
         </div>
